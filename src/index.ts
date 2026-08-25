@@ -153,6 +153,7 @@ export class UvPythonCodeRuntime extends CodeRuntime {
       env: { UV_NO_CONFIG: '1', UV_PYTHON_DOWNLOADS: 'automatic' },
       stdio: ['ignore', 'pipe', 'pipe', 'pipe'], detached: true,
     })
+    const exited = new Promise<void>(done => child.once('exit', () => done()))
     const channel = child.stdio[3] as Duplex
     const boot: BootMessage = {
       type: 'boot', cpuSeconds: this.config.cpuSeconds,
@@ -174,7 +175,7 @@ export class UvPythonCodeRuntime extends CodeRuntime {
         if (settled) return
         settled = true; clearTimeout(wall); request.signal?.removeEventListener('abort', onAbort)
         this.live.delete(live); kill()
-        void new Promise<void>(done => child.once('exit', () => done())).then(() => { finishDone(); resolve(result) })
+        void exited.then(() => { finishDone(); resolve(result) })
       }
       const fail = (kind: CodeRunFailure['kind'], message: string): void => finish({ logs, error: { kind, message } })
       const send = (message: BootMessage | ReplyMessage | { type: 'run'; program: string }): void => {
@@ -225,7 +226,11 @@ export class UvPythonCodeRuntime extends CodeRuntime {
       const substrateStderr: string[] = []
       child.stderr?.on('data', (chunk: Buffer) => { if (!settled) substrateStderr.push(chunk.toString('utf8')) })
       child.on('error', error => fail('worker-exit', messageOf(error)))
-      child.on('exit', (code, signal) => { if (!settled) fail('worker-exit', `Python process exited before completion (code ${String(code)}, signal ${String(signal)}): ${substrateStderr.join('').slice(0, 500)}`) })
+      child.on('exit', (code, signal) => {
+        if (settled) return
+        if (signal === 'SIGXCPU') fail('timeout', `CPU budget exhausted (${this.config.cpuSeconds}s)`)
+        else fail('worker-exit', `Python process exited before completion (code ${String(code)}, signal ${String(signal)}): ${substrateStderr.join('').slice(0, 500)}`)
+      })
       const wall = setTimeout(() => fail('timeout', `wall-clock ceiling reached (${this.config.maxWallMs}ms)`), this.config.maxWallMs)
       const onAbort = (): void => fail('abort', String(request.signal?.reason))
       request.signal?.addEventListener('abort', onAbort, { once: true })
