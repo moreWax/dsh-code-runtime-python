@@ -1,0 +1,14 @@
+# Replace the profile's TypeScript worker provider with uv-managed CPython.
+- id: code-runtime
+  disabled: true
+- insert:
+    - id: code-runtime-python-uv
+      name: '@morewax/dsh-code-runtime-python'
+      config:
+        uv: uv
+        python: '3.12'
+        cpuSeconds: 60
+        maxWallMs: 600000
+        addressSpaceBytes: 536870912
+        maxOutputBytes: 67108864
+        maxFrameBytes: 67108864
